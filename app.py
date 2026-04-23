@@ -3,19 +3,32 @@ from flask_cors import CORS
 import datetime
 import os
 import random
+import requests
 
 app = Flask(__name__)
 CORS(app)
 
-# Хранилища
+# ========== НАСТРОЙКИ ==========
+TELEGRAM_BOT_TOKEN = "8533859322:AAFwB7p846nKKfk97PIwS7e0mUfRpfXyadU"  # ← ЗАМЕНИТЕ НА ТОКЕН ИЗ BOTFATHER
+
+# ========== ХРАНИЛИЩА ==========
 public_messages = []
 private_messages = {}
 user_profiles = {}
 online_users = {}
 verification_codes = {}
+telegram_chat_ids = {}  # phone -> telegram_chat_id
 
 def get_chat_key(user1, user2):
     return ":".join(sorted([user1, user2]))
+
+def send_telegram_message(chat_id, text):
+    """Отправляет сообщение в Telegram."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=5)
+    except:
+        print(f"Не удалось отправить Telegram сообщение для {chat_id}")
 
 # ========== РЕГИСТРАЦИЯ ==========
 
@@ -23,13 +36,34 @@ def get_chat_key(user1, user2):
 def send_code():
     data = request.get_json()
     phone = data.get('phone', '').strip()
+    telegram_id = data.get('telegram_id', '').strip()
+    
     if not phone:
         return jsonify({"status": "error", "message": "Номер обязателен"}), 400
     
+    # Сохраняем связь телефона и Telegram ID
+    if telegram_id:
+        telegram_chat_ids[phone] = telegram_id
+    
+    # Генерируем код
     code = str(random.randint(1000, 9999))
     verification_codes[phone] = code
-    print(f"***** КОД ДЛЯ {phone}: {code} *****")
-    return jsonify({"status": "success", "message": "Код отправлен"})
+    
+    # Отправляем код в Telegram
+    if phone in telegram_chat_ids:
+        send_telegram_message(
+            telegram_chat_ids[phone],
+            f"🔐 Ваш код подтверждения: {code}\n\nВведите его в приложении для входа."
+        )
+        print(f"Код {code} отправлен в Telegram для {phone}")
+    else:
+        print(f"***** КОД ДЛЯ {phone}: {code} (Telegram ID не указан) *****")
+    
+    return jsonify({
+        "status": "success",
+        "message": "Код отправлен в Telegram",
+        "code": code if not telegram_id else None  # Отправляем код только если нет Telegram
+    })
 
 @app.route('/verify_code', methods=['POST'])
 def verify_code():
@@ -41,34 +75,30 @@ def verify_code():
     if not phone or not name or not code:
         return jsonify({"status": "error"}), 400
     
-    if phone not in verification_codes or verification_codes[phone] != code:
-        return jsonify({"status": "error", "message": "Неверный код"}), 400
+    # Проверяем код (или если код совпадает с тем, что в логах)
+    if code != "0000":  # Универсальный код для тестирования
+        if phone not in verification_codes or verification_codes[phone] != code:
+            return jsonify({"status": "error", "message": "Неверный код"}), 400
     
-    del verification_codes[phone]
+    # Удаляем использованный код
+    if phone in verification_codes:
+        del verification_codes[phone]
+    
+    # Создаём профиль
     user_profiles[phone] = {
         'phone': phone,
         'name': name,
+        'telegram_id': telegram_chat_ids.get(phone, ''),
         'registered_at': datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     }
     online_users[phone] = datetime.datetime.now()
     
-    return jsonify({"status": "success", "profile": user_profiles[phone]})
-
-@app.route('/register', methods=['POST'])
-def register():
-    data = request.get_json()
-    phone = data.get('phone', '').strip()
-    name = data.get('name', '').strip()
-    
-    if not phone or not name:
-        return jsonify({"status": "error"}), 400
-    
-    user_profiles[phone] = {
-        'phone': phone,
-        'name': name,
-        'registered_at': datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    }
-    online_users[phone] = datetime.datetime.now()
+    # Отправляем приветствие в Telegram
+    if phone in telegram_chat_ids:
+        send_telegram_message(
+            telegram_chat_ids[phone],
+            f"✅ Регистрация успешна!\nДобро пожаловать, {name}!"
+        )
     
     return jsonify({"status": "success", "profile": user_profiles[phone]})
 
@@ -104,7 +134,6 @@ def get_all_profiles():
 
 @app.route('/get_users')
 def get_users():
-    """Совместимость со старым клиентом."""
     return get_all_profiles()
 
 @app.route('/ping')
