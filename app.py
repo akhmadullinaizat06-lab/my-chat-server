@@ -9,7 +9,7 @@ app = Flask(__name__)
 CORS(app)
 
 # ========== НАСТРОЙКИ ==========
-TELEGRAM_BOT_TOKEN = "8533859322:AAFwB7p846nKKfk97PIwS7e0mUfRpfXyadU"  # ← ЗАМЕНИТЕ НА ТОКЕН ИЗ BOTFATHER
+TELEGRAM_BOT_TOKEN = "8533859322:AAFwB7p846nKKfk97PIwS7e0mUfRpfXyadU"
 
 # ========== ХРАНИЛИЩА ==========
 public_messages = []
@@ -17,7 +17,7 @@ private_messages = {}
 user_profiles = {}
 online_users = {}
 verification_codes = {}
-telegram_chat_ids = {}  # phone -> telegram_chat_id
+telegram_chat_ids = {}
 
 def get_chat_key(user1, user2):
     return ":".join(sorted([user1, user2]))
@@ -26,9 +26,11 @@ def send_telegram_message(chat_id, text):
     """Отправляет сообщение в Telegram."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
-        requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=5)
+        response = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=5)
+        return response.status_code == 200
     except:
         print(f"Не удалось отправить Telegram сообщение для {chat_id}")
+        return False
 
 # ========== РЕГИСТРАЦИЯ ==========
 
@@ -49,20 +51,25 @@ def send_code():
     code = str(random.randint(1000, 9999))
     verification_codes[phone] = code
     
-    # Отправляем код в Telegram
+    # Отправляем код в Telegram (если есть ID)
     if phone in telegram_chat_ids:
-        send_telegram_message(
+        success = send_telegram_message(
             telegram_chat_ids[phone],
             f"🔐 Ваш код подтверждения: {code}\n\nВведите его в приложении для входа."
         )
-        print(f"Код {code} отправлен в Telegram для {phone}")
-    else:
-        print(f"***** КОД ДЛЯ {phone}: {code} (Telegram ID не указан) *****")
+        if success:
+            print(f"Код {code} отправлен в Telegram для {phone}")
+        else:
+            print(f"Не удалось отправить код в Telegram для {phone}")
+
+    
+# Всегда логируем код
+    print(f"***** КОД ДЛЯ {phone}: {code} *****")
     
     return jsonify({
         "status": "success",
-        "message": "Код отправлен в Telegram",
-        "code": code if not telegram_id else None  # Отправляем код только если нет Telegram
+        "message": "Код отправлен",
+        "code": code  # ВСЕГДА возвращаем код (для тестирования)
     })
 
 @app.route('/verify_code', methods=['POST'])
@@ -75,10 +82,12 @@ def verify_code():
     if not phone or not name or not code:
         return jsonify({"status": "error"}), 400
     
-    # Проверяем код (или если код совпадает с тем, что в логах)
-    if code != "0000":  # Универсальный код для тестирования
-        if phone not in verification_codes or verification_codes[phone] != code:
-            return jsonify({"status": "error", "message": "Неверный код"}), 400
+    # Проверяем код (0000 - универсальный код)
+    if code == "0000":
+        # Универсальный код - пропускаем
+        pass
+    elif phone not in verification_codes or verification_codes[phone] != code:
+        return jsonify({"status": "error", "message": "Неверный код"}), 400
     
     # Удаляем использованный код
     if phone in verification_codes:
@@ -249,6 +258,25 @@ def get_chats():
                 })
     
     return jsonify(sorted(chats, key=lambda x: x['last_time'], reverse=True))
+
+# ========== ТЕСТИРОВАНИЕ ==========
+
+@app.route('/test_telegram')
+def test_telegram():
+    """Проверка отправки сообщения в Telegram."""
+    try:
+        # ЗАМЕНИТЕ 123456789 НА ВАШ TELEGRAM ID
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        response = requests.post(url, json={
+            "chat_id": 123456789,  # ← ЗАМЕНИТЕ НА ВАШ TELEGRAM ID
+            "text": "Тестовое сообщение от сервера!"
+        }, timeout=5)
+        return jsonify({
+            "status": "sent" if response.status_code == 200 else "error",
+            "response": response.json()
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
 
 @app.route('/version.json')
 def version():
