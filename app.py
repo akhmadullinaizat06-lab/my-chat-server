@@ -147,7 +147,14 @@ def ping():
         online_users[username] = datetime.datetime.now()
         all_users.add(username)
     return jsonify({"status": "ok"})
-
+@app.route('/version.json')
+def version():
+    """Возвращает информацию о последней версии приложения."""
+    return jsonify({
+        "version": 2,                    # Увеличивайте при каждом обновлении
+        "version_name": "1.1",           # Версия для отображения
+        "download_url": "https://github.com/akhmadullinaizat06-lab/my-chat-server/releases/download/v1.1/onlinechat.apk"
+    })
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
